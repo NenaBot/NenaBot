@@ -1,6 +1,8 @@
 [submodule "frontend"]
 	path = frontend
 	url = git@github.com:NenaBot/nenabot-frontend.git
+	branch = main
 [submodule "backend"]
 	path = backend
 	url = git@github.com:NenaBot/nenabot-backend.git
+	branch = main

@@ -1,0 +1,95 @@
+name: Update Submodules
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [submodule-updated]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-submodules
+  cancel-in-progress: false
+
+jobs:
+  update-submodules:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          if [ -n "${SUBMODULES_PAT}" ]; then
+            git config --global url."https://x-access-token:${SUBMODULES_PAT}@github.com/".insteadOf "git@github.com:"
+            git config --global url."https://x-access-token:${SUBMODULES_PAT}@github.com/".insteadOf "https://github.com/"
+          else
+            git config --global url."https://github.com/".insteadOf "git@github.com:"
+          fi
+
+      - name: Update submodules to latest tracked branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+          module_paths=()
+
+          while IFS= read -r module_path; do
+            [ -z "$module_path" ] && continue
+            module_paths+=("$module_path")
+
+            module_name="$(basename "$module_path")"
+            branch="$(git config -f .gitmodules --get "submodule.${module_name}.branch" || true)"
+            if [ -z "$branch" ]; then
+              branch="main"
+            fi
+
+            echo "Updating ${module_path} on branch ${branch}"
+
+            git -C "$module_path" fetch origin "$branch"
+            git -C "$module_path" checkout "$branch"
+            git -C "$module_path" pull --ff-only origin "$branch"
+          done < <(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}')
+
+          git add .gitmodules
+          git submodule foreach --recursive 'git rev-parse HEAD > /dev/null'
+          if [ "${#module_paths[@]}" -gt 0 ]; then
+            git add "${module_paths[@]}"
+          fi
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/update-submodule-pointers
+          commit-message: "chore(submodules): update frontend and backend pointers"
+          title: "chore(submodules): update frontend and backend pointers"
+          body: |
+            This PR was created automatically by GitHub Actions.
+
+            It updates submodule commit pointers to the latest commits on their tracked branches.
+
+            - Trigger: `${{ github.event_name }}`
+            - Workflow: `${{ github.workflow }}`
+          labels: |
+            dependencies
+            automated
+          delete-branch: true
