@@ -25,6 +25,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: false
+          persist-credentials: false
 
       - name: Configure git identity
         run: |
@@ -37,12 +38,46 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TOKEN="${SUBMODULES_PAT:-${GITHUB_TOKEN}}"
-          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
-
-          if [ -z "${SUBMODULES_PAT}" ]; then
-            echo "::warning::SUBMODULES_PAT is not set. Using GITHUB_TOKEN fallback; private submodules in other repos may still fail."
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::No token available (SUBMODULES_PAT and GITHUB_TOKEN are empty)."
+            exit 1
           fi
+
+          if [ -n "${SUBMODULES_PAT}" ]; then
+            echo "Using SUBMODULES_PAT for submodule auth."
+          else
+            echo "::warning::SUBMODULES_PAT is not set. Using GITHUB_TOKEN fallback; private submodules in other repos may fail."
+          fi
+
+          # Use --add so multiple rewrite rules are kept (without --add, later lines overwrite earlier ones).
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          # Debug output (safe): show configured rewrite keys without token values.
+          git config --global --get-regexp '^url\..*\.insteadOf$' | sed -E 's#https://x-access-token:[^@]+@github.com/#https://x-access-token:***@github.com/#'
+
+      - name: Verify submodule access
+        shell: bash
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          TOKEN="${SUBMODULES_PAT:-${GITHUB_TOKEN}}"
+
+          while IFS= read -r key url; do
+            [ -z "${url}" ] && continue
+            auth_url="${url}"
+            auth_url="${auth_url/git@github.com:/https://x-access-token:${TOKEN}@github.com/}"
+            auth_url="${auth_url/ssh:\/\/git@github.com\//https://x-access-token:${TOKEN}@github.com/}"
+            auth_url="${auth_url/https:\/\/github.com\//https://x-access-token:${TOKEN}@github.com/}"
+
+            safe_url="$(printf '%s' "${auth_url}" | sed -E 's#https://x-access-token:[^@]+@github.com/#https://x-access-token:***@github.com/#')"
+            echo "Checking access: ${safe_url}"
+            git ls-remote "${auth_url}" -h >/dev/null
+          done < <(git config -f .gitmodules --get-regexp '^submodule\..*\.url$')
 
       - name: Update submodules to latest tracked branch
         shell: bash
