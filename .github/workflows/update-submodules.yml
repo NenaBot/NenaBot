@@ -34,12 +34,14 @@ jobs:
       - name: Configure submodule URL auth
         env:
           SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${SUBMODULES_PAT}" ]; then
-            git config --global url."https://x-access-token:${SUBMODULES_PAT}@github.com/".insteadOf "git@github.com:"
-            git config --global url."https://x-access-token:${SUBMODULES_PAT}@github.com/".insteadOf "https://github.com/"
-          else
-            git config --global url."https://github.com/".insteadOf "git@github.com:"
+          TOKEN="${SUBMODULES_PAT:-${GITHUB_TOKEN}}"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          if [ -z "${SUBMODULES_PAT}" ]; then
+            echo "::warning::SUBMODULES_PAT is not set. Using GITHUB_TOKEN fallback; private submodules in other repos may still fail."
           fi
 
       - name: Update submodules to latest tracked branch

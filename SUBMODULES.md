@@ -18,7 +18,8 @@ If submodules are private, add repo secret:
 
 - `SUBMODULES_PAT` with read access to submodule repos
 
-If submodules are public, no extra secret is required.
+If `SUBMODULES_PAT` is missing, the workflow falls back to `GITHUB_TOKEN`.
+For private submodules in separate repositories, `SUBMODULES_PAT` is usually required.
 
 ## Manual Fallback
 
