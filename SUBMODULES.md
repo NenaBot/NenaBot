@@ -14,12 +14,16 @@ Workflow file:
 
 ## Required Setup
 
-If submodules are private, add repo secret:
+Add repository secret:
 
-- `SUBMODULES_PAT` with read access to submodule repos
+- `SUBMODULES_PAT`
 
-If `SUBMODULES_PAT` is missing, the workflow falls back to `GITHUB_TOKEN`.
-For private submodules in separate repositories, `SUBMODULES_PAT` is usually required.
+Token needs access to:
+
+- Parent repo `NenaBot/NenaBot`: `Contents (Read and write)`, `Pull requests (Read and write)`
+- Submodule repos `NenaBot/nenabot-backend` and `NenaBot/nenabot-frontend`: `Contents (Read-only)`
+
+Also ensure org SSO is authorized for this token if your organization requires SSO.
 
 ## Manual Fallback
 

@@ -2,7 +2,7 @@ name: Update Submodules
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 12 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [submodule-updated]
@@ -35,19 +35,13 @@ jobs:
       - name: Configure submodule URL auth
         env:
           SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TOKEN="${SUBMODULES_PAT:-${GITHUB_TOKEN}}"
+          TOKEN="${SUBMODULES_PAT}"
           if [ -z "${TOKEN}" ]; then
-            echo "::error::No token available (SUBMODULES_PAT and GITHUB_TOKEN are empty)."
+            echo "::error::SUBMODULES_PAT is required and is not set."
             exit 1
           fi
-
-          if [ -n "${SUBMODULES_PAT}" ]; then
-            echo "Using SUBMODULES_PAT for submodule auth."
-          else
-            echo "::warning::SUBMODULES_PAT is not set. Using GITHUB_TOKEN fallback; private submodules in other repos may fail."
-          fi
+          echo "Using SUBMODULES_PAT for submodule auth."
 
           # Use --add so multiple rewrite rules are kept (without --add, later lines overwrite earlier ones).
           git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
@@ -61,11 +55,10 @@ jobs:
         shell: bash
         env:
           SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           export GIT_TERMINAL_PROMPT=0
-          TOKEN="${SUBMODULES_PAT:-${GITHUB_TOKEN}}"
+          TOKEN="${SUBMODULES_PAT}"
 
           while IFS= read -r key url; do
             [ -z "${url}" ] && continue
@@ -115,7 +108,7 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SUBMODULES_PAT }}
           branch: chore/update-submodule-pointers
           commit-message: "chore(submodules): update frontend and backend pointers"
           title: "chore(submodules): update frontend and backend pointers"
