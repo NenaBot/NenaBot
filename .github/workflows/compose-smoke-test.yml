@@ -20,11 +20,29 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
           fetch-depth: 0
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          TOKEN="${SUBMODULES_PAT}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Fetch submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       - name: Show Docker versions
         run: |
