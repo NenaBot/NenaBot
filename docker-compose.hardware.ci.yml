@@ -1,0 +1,13 @@
+# CI override for the hardware compose path.
+#
+# GitHub-hosted runners don't have /dev/ttyUSB0 or /dev/video0, so this
+# override clears the device mappings so the hardware stack can start in CI.
+#
+# Usage (CI only):
+#   docker compose -f docker-compose.yml -f docker-compose.hardware.yml -f docker-compose.hardware.ci.yml up -d
+#
+# The backend will report robot/camera as "disconnected" but will still serve HTTP.
+
+services:
+  backend:
+    devices: []

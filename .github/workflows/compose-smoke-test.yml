@@ -1,0 +1,108 @@
+name: Compose Smoke Test
+
+on:
+  schedule:
+    # Daily at 06:30 UTC
+    - cron: "30 6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: compose-smoke-test
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Compose config validation
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml config
+          docker compose -f docker-compose.yml -f docker-compose.hardware.yml config
+          docker compose -f docker-compose.yml -f docker-compose.hardware.yml -f docker-compose.hardware.ci.yml config
+
+      - name: Smoke test — normal compose
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml up -d --build
+          docker compose -f docker-compose.yml ps
+
+          # Wait up to 60 s for the backend health endpoint to become available
+          backend_up=false
+          for i in $(seq 1 30); do
+            if curl -fsS "http://localhost:8000/health" >/dev/null 2>&1; then
+              echo "Backend is up (attempt ${i})"
+              backend_up=true
+              break
+            fi
+            echo "Waiting for backend... (attempt ${i}/30)"
+            sleep 2
+          done
+          if [ "${backend_up}" != "true" ]; then
+            echo "::error::Backend did not become healthy within 60 s"
+            exit 1
+          fi
+
+          curl -fsS "http://localhost:8000/health"
+          curl -fsS "http://localhost:8080/" >/dev/null
+
+      - name: Teardown — normal compose
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml down -v || true
+
+      - name: Smoke test — hardware compose path (CI simulation)
+        run: |
+          set -euxo pipefail
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.hardware.yml \
+            -f docker-compose.hardware.ci.yml \
+            up -d --build
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.hardware.yml \
+            -f docker-compose.hardware.ci.yml \
+            ps
+
+          # Wait up to 60 s for the backend health endpoint to become available
+          backend_up=false
+          for i in $(seq 1 30); do
+            if curl -fsS "http://localhost:8000/health" >/dev/null 2>&1; then
+              echo "Backend is up (attempt ${i})"
+              backend_up=true
+              break
+            fi
+            echo "Waiting for backend... (attempt ${i}/30)"
+            sleep 2
+          done
+          if [ "${backend_up}" != "true" ]; then
+            echo "::error::Backend did not become healthy within 60 s"
+            exit 1
+          fi
+
+          curl -fsS "http://localhost:8000/health"
+          curl -fsS "http://localhost:8080/" >/dev/null
+
+      - name: Teardown — hardware compose path
+        if: always()
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.hardware.yml \
+            -f docker-compose.hardware.ci.yml \
+            down -v || true
