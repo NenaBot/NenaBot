@@ -50,6 +50,7 @@ jobs:
           docker compose version
 
       - name: Compose config validation
+        id: config-validation
         run: |
           set -euxo pipefail
           docker compose -f docker-compose.yml config
@@ -57,6 +58,7 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.hardware.yml -f docker-compose.hardware.ci.yml config
 
       - name: Smoke test — normal compose
+        id: smoke-normal
         run: |
           set -euxo pipefail
           docker compose -f docker-compose.yml up -d --build
@@ -87,6 +89,7 @@ jobs:
           docker compose -f docker-compose.yml down -v || true
 
       - name: Smoke test — hardware compose path (CI simulation)
+        id: smoke-hardware
         run: |
           set -euxo pipefail
           docker compose \
@@ -127,3 +130,40 @@ jobs:
             -f docker-compose.hardware.yml \
             -f docker-compose.hardware.ci.yml \
             down -v || true
+
+      - name: Write job summary
+        if: always()
+        env:
+          CONFIG_OUTCOME: ${{ steps.config-validation.outcome }}
+          NORMAL_OUTCOME: ${{ steps.smoke-normal.outcome }}
+          HARDWARE_OUTCOME: ${{ steps.smoke-hardware.outcome }}
+        run: |
+          icon() {
+            case "$1" in
+              success)  echo "✅ success" ;;
+              failure)  echo "❌ failure" ;;
+              skipped)  echo "⏭️ skipped" ;;
+              *)        echo "⚠️ $1" ;;
+            esac
+          }
+
+          overall="✅ All checks passed"
+          if [ "${CONFIG_OUTCOME}" != "success" ] || \
+             [ "${NORMAL_OUTCOME}"   != "success" ] || \
+             [ "${HARDWARE_OUTCOME}" != "success" ]; then
+            overall="❌ One or more checks failed"
+          fi
+
+          cat >> "${GITHUB_STEP_SUMMARY}" <<EOF
+          ## 🐳 Compose Smoke Test — Results
+
+          | Check | Result |
+          |---|---|
+          | Compose config validation | $(icon "${CONFIG_OUTCOME}") |
+          | Smoke test — normal compose | $(icon "${NORMAL_OUTCOME}") |
+          | Smoke test — hardware compose (CI) | $(icon "${HARDWARE_OUTCOME}") |
+
+          **Overall: ${overall}**
+
+          > Triggered by \`${{ github.event_name }}\` on \`${{ github.ref_name }}\` — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          EOF
