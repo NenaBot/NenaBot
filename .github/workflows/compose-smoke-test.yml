@@ -1,10 +1,13 @@
 name: Compose Smoke Test
 
 on:
+  push:
+    branches:
+      - copilot/add-compose-smoke-test-workflow
   schedule:
-    # Daily at 06:30 UTC
+    # Daily at 06:30 UTC (adjust as desired)
     - cron: "30 6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 concurrency:
   group: compose-smoke-test
