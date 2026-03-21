@@ -169,6 +169,10 @@ jobs:
             esac
           }
 
+          config_icon=$(icon "${CONFIG_OUTCOME}")
+          normal_icon=$(icon "${NORMAL_OUTCOME}")
+          hardware_icon=$(icon "${HARDWARE_OUTCOME}")
+
           overall="✅ All checks passed"
           if [ "${CONFIG_OUTCOME}" != "success" ] || \
              [ "${NORMAL_OUTCOME}"   != "success" ] || \
@@ -176,16 +180,18 @@ jobs:
             overall="❌ One or more checks failed"
           fi
 
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
           cat >> "${GITHUB_STEP_SUMMARY}" <<EOF
           ## 🐳 Compose Smoke Test — Results
 
           | Check | Result |
           |---|---|
-          | Compose config validation | $(icon "${CONFIG_OUTCOME}") |
-          | Smoke test — normal compose | $(icon "${NORMAL_OUTCOME}") |
-          | Smoke test — hardware compose (CI) | $(icon "${HARDWARE_OUTCOME}") |
+          | Compose config validation | ${config_icon} |
+          | Smoke test — normal compose | ${normal_icon} |
+          | Smoke test — hardware compose (CI) | ${hardware_icon} |
 
           **Overall: ${overall}**
 
-          > Triggered by \`${{ github.event_name }}\` on \`${{ github.ref_name }}\` — run [\`${{ github.run_id }}\`](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          > Triggered by \`${GITHUB_EVENT_NAME}\` on \`${GITHUB_REF_NAME}\` — run [\`${GITHUB_RUN_ID}\`](${run_url})
           EOF
