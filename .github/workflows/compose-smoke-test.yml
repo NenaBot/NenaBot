@@ -76,6 +76,10 @@ jobs:
             sleep 2
           done
           if [ "${backend_up}" != "true" ]; then
+            echo "--- Container state at timeout ---"
+            docker compose -f docker-compose.yml ps --all
+            echo "--- Backend logs ---"
+            docker compose -f docker-compose.yml logs backend --no-log-prefix
             echo "::error::Backend did not become healthy within 60 s"
             exit 1
           fi
@@ -115,6 +119,18 @@ jobs:
             sleep 2
           done
           if [ "${backend_up}" != "true" ]; then
+            echo "--- Container state at timeout ---"
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.hardware.yml \
+              -f docker-compose.hardware.ci.yml \
+              ps --all
+            echo "--- Backend logs ---"
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.hardware.yml \
+              -f docker-compose.hardware.ci.yml \
+              logs backend --no-log-prefix
             echo "::error::Backend did not become healthy within 60 s"
             exit 1
           fi
