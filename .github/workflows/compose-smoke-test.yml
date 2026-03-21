@@ -188,4 +188,9 @@ jobs:
             echo "|---|---|"
             echo "| Compose config validation | $(icon "${CONFIG_OUTCOME}") |"
             echo "| Smoke test — normal compose | $(icon "${NORMAL_OUTCOME}") |"
-            echo "| Smoke test — hardware compose (](#)*
+            echo "| Smoke test — hardware compose (CI) | $(icon "${HARDWARE_OUTCOME}") |"
+            echo
+            echo "**Overall: ${overall}**"
+            echo
+            echo "> Triggered by \`${GITHUB_EVENT_NAME}\` on \`${GITHUB_REF_NAME}\` — run [\`${GITHUB_RUN_ID}\`](${run_url})"
+          } >> "${GITHUB_STEP_SUMMARY}"
