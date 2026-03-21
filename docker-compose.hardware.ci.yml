@@ -7,7 +7,12 @@
 #   docker compose -f docker-compose.yml -f docker-compose.hardware.yml -f docker-compose.hardware.ci.yml up -d
 #
 # The backend will report robot/camera as "disconnected" but will still serve HTTP.
+#
+# Note: `!reset []` is required (not plain `[]`) because Docker Compose v2 uses
+# mergo.WithAppendSlice when merging sequences, which makes an empty override
+# list a no-op.  The `!reset` YAML extension tag explicitly replaces the list
+# from docker-compose.hardware.yml with an empty list.
 
 services:
   backend:
-    devices: []
+    devices: !reset []
