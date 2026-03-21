@@ -1,0 +1,196 @@
+name: Compose Smoke Test
+
+on:
+  push:
+    branches:
+      - copilot/add-compose-smoke-test-workflow
+  schedule:
+    # Daily at 06:30 UTC (adjust as desired)
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: compose-smoke-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          set -euo pipefail
+          TOKEN="${SUBMODULES_PAT:-}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+
+          # Only rewrite SSH-style GitHub URLs; do NOT globally rewrite https://github.com/
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Fetch submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Show Docker versions
+        run: |
+          set -euo pipefail
+          docker --version
+          docker compose version
+
+      - name: Compose config validation
+        id: config-validation
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml config
+          docker compose -f docker-compose.yml -f docker-compose.hardware.yml config
+          docker compose -f docker-compose.yml -f docker-compose.hardware.yml -f docker-compose.hardware.ci.yml config
+
+      - name: Smoke test — normal compose
+        id: smoke-normal
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml up -d --build
+          docker compose -f docker-compose.yml ps
+
+          backend_up=false
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
+              echo "Backend is up (attempt ${i})"
+              backend_up=true
+              break
+            fi
+            echo "Waiting for backend... (attempt ${i}/30)"
+            sleep 2
+          done
+
+          if [ "${backend_up}" != "true" ]; then
+            echo "--- Container state at timeout ---"
+            docker compose -f docker-compose.yml ps --all || true
+            echo "--- Compose logs (all services) ---"
+            docker compose -f docker-compose.yml logs --no-log-prefix || true
+            echo "::error::Backend did not become healthy within 60 s"
+            exit 1
+          fi
+
+          curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null
+          curl -fsS --max-time 2 "http://localhost:8080/" >/dev/null
+
+      - name: Teardown — normal compose
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml down -v || true
+
+      - name: Smoke test — hardware compose path (CI simulation)
+        id: smoke-hardware
+        run: |
+          set -euxo pipefail
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.hardware.yml \
+            -f docker-compose.hardware.ci.yml \
+            up -d --build
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.hardware.yml \
+            -f docker-compose.hardware.ci.yml \
+            ps
+
+          backend_up=false
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
+              echo "Backend is up (attempt ${i})"
+              backend_up=true
+              break
+            fi
+            echo "Waiting for backend... (attempt ${i}/30)"
+            sleep 2
+          done
+
+          if [ "${backend_up}" != "true" ]; then
+            echo "--- Container state at timeout ---"
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.hardware.yml \
+              -f docker-compose.hardware.ci.yml \
+              ps --all || true
+            echo "--- Compose logs (all services) ---"
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.hardware.yml \
+              -f docker-compose.hardware.ci.yml \
+              logs --no-log-prefix || true
+            echo "::error::Backend did not become healthy within 60 s"
+            exit 1
+          fi
+
+          curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null
+          curl -fsS --max-time 2 "http://localhost:8080/" >/dev/null
+
+      - name: Teardown — hardware compose path
+        if: always()
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.hardware.yml \
+            -f docker-compose.hardware.ci.yml \
+            down -v || true
+
+      - name: Write job summary
+        if: always()
+        env:
+          CONFIG_OUTCOME: ${{ steps.config-validation.outcome }}
+          NORMAL_OUTCOME: ${{ steps.smoke-normal.outcome }}
+          HARDWARE_OUTCOME: ${{ steps.smoke-hardware.outcome }}
+        run: |
+          set -euo pipefail
+
+          icon() {
+            case "$1" in
+              success)  echo "✅ success" ;;
+              failure)  echo "❌ failure" ;;
+              skipped)  echo "⏭️ skipped" ;;
+              *)        echo "⚠️ $1" ;;
+            esac
+          }
+
+          overall="✅ All checks passed"
+          if [ "${CONFIG_OUTCOME}" != "success" ] || \
+             [ "${NORMAL_OUTCOME}"   != "success" ] || \
+             [ "${HARDWARE_OUTCOME}" != "success" ]; then
+            overall="❌ One or more checks failed"
+          fi
+
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          {
+            echo "## 🐳 Compose Smoke Test — Results"
+            echo
+            echo "| Check | Result |"
+            echo "|---|---|"
+            echo "| Compose config validation | $(icon "${CONFIG_OUTCOME}") |"
+            echo "| Smoke test — normal compose | $(icon "${NORMAL_OUTCOME}") |"
+            echo "| Smoke test — hardware compose (CI) | $(icon "${HARDWARE_OUTCOME}") |"
+            echo
+            echo "**Overall: ${overall}**"
+            echo
+            echo "> Triggered by \`${GITHUB_EVENT_NAME}\` on \`${GITHUB_REF_NAME}\` — run [\`${GITHUB_RUN_ID}\`](${run_url})"
+          } >> "${GITHUB_STEP_SUMMARY}"
