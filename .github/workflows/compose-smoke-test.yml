@@ -64,10 +64,13 @@ jobs:
           docker compose -f docker-compose.yml up -d --build
           docker compose -f docker-compose.yml ps
 
-          # Wait up to 60 s for the backend health endpoint to become available
+          # Wait up to 60 s for the backend to become available.
+          # FastAPI always exposes GET /openapi.json (HTTP 200) regardless of
+          # which application routes are defined, making it a reliable readiness
+          # probe that does not require a dedicated /health endpoint.
           backend_up=false
           for i in $(seq 1 30); do
-            if curl -fsS "http://localhost:8000/health" >/dev/null 2>&1; then
+            if curl -fsS "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
               echo "Backend is up (attempt ${i})"
               backend_up=true
               break
@@ -84,7 +87,7 @@ jobs:
             exit 1
           fi
 
-          curl -fsS "http://localhost:8000/health"
+          curl -fsS "http://localhost:8000/openapi.json" >/dev/null
           curl -fsS "http://localhost:8080/" >/dev/null
 
       - name: Teardown — normal compose
@@ -107,10 +110,13 @@ jobs:
             -f docker-compose.hardware.ci.yml \
             ps
 
-          # Wait up to 60 s for the backend health endpoint to become available
+          # Wait up to 60 s for the backend to become available.
+          # FastAPI always exposes GET /openapi.json (HTTP 200) regardless of
+          # which application routes are defined, making it a reliable readiness
+          # probe that does not require a dedicated /health endpoint.
           backend_up=false
           for i in $(seq 1 30); do
-            if curl -fsS "http://localhost:8000/health" >/dev/null 2>&1; then
+            if curl -fsS "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
               echo "Backend is up (attempt ${i})"
               backend_up=true
               break
@@ -135,7 +141,7 @@ jobs:
             exit 1
           fi
 
-          curl -fsS "http://localhost:8000/health"
+          curl -fsS "http://localhost:8000/openapi.json" >/dev/null
           curl -fsS "http://localhost:8080/" >/dev/null
 
       - name: Teardown — hardware compose path
