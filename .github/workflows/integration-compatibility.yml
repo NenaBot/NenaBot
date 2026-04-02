@@ -1,0 +1,129 @@
+name: FE-BE Integration Compatibility
+
+on:
+  schedule:
+    - cron: "15 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: integration-compatibility-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          set -euo pipefail
+          TOKEN="${SUBMODULES_PAT:-}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+
+          # Only rewrite SSH-style GitHub URLs; do NOT globally rewrite https://github.com/
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Fetch submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Show Docker versions
+        run: |
+          set -euo pipefail
+          docker --version
+          docker compose version
+
+      - name: Start compose stack
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml up -d --build
+          docker compose -f docker-compose.yml ps
+
+      - name: Wait for backend and frontend readiness
+        run: |
+          set -euo pipefail
+
+          backend_up=false
+          frontend_up=false
+
+          for i in $(seq 1 45); do
+            if curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
+              backend_up=true
+            fi
+            if curl -fsS --max-time 2 "http://localhost:8080/" >/dev/null 2>&1; then
+              frontend_up=true
+            fi
+
+            if [ "${backend_up}" = "true" ] && [ "${frontend_up}" = "true" ]; then
+              echo "Backend and frontend are up (attempt ${i})"
+              break
+            fi
+
+            echo "Waiting for services... backend=${backend_up} frontend=${frontend_up} (attempt ${i}/45)"
+            sleep 2
+          done
+
+          if [ "${backend_up}" != "true" ] || [ "${frontend_up}" != "true" ]; then
+            echo "::error::Timed out waiting for backend/frontend readiness"
+            exit 1
+          fi
+
+      - name: Run FE-BE compatibility probe
+        id: run-probe
+        run: |
+          set -euo pipefail
+          bash scripts/integration/compatibility-probe.sh
+
+      - name: Capture compose logs
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml logs --no-log-prefix > compose-logs.txt || true
+
+      - name: Upload compatibility artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-compatibility-artifacts
+          path: |
+            compatibility-probe.log
+            compose-logs.txt
+          retention-days: 14
+
+      - name: Teardown stack
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml down -v || true
+
+      - name: Add failure excerpt to summary
+        if: failure()
+        run: |
+          {
+            echo ""
+            echo "<details>"
+            echo "<summary><strong>Compatibility probe log excerpt (last 120 lines)</strong></summary>"
+            echo ""
+            echo '```text'
+            tail -n 120 compatibility-probe.log || true
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
