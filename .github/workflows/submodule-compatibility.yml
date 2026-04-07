@@ -145,11 +145,12 @@ jobs:
         run: |
           set -euo pipefail
           echo "Current submodule commit pointers:"
-          git config --file=.gitmodules --format=json --name-only 2>/dev/null | while read module; do
-            path=$(git config -f .gitmodules --get "submodule.${module}.path")
-            url=$(git config -f .gitmodules --get "submodule.${module}.url")
+          git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | while read -r key path; do
+            module="${key#submodule.}"
+            module="${module%.path}"
+            url=$(git config -f .gitmodules --get "submodule.${module}.url" || echo "unknown")
             commit=$(cd "$path" 2>/dev/null && git rev-parse HEAD || echo "N/A")
-            echo "  - $(basename $path): $commit"
+            echo "  - ${module}: ${commit} (${url})"
           done
 
       - name: Generate compatibility report

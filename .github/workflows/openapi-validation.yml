@@ -98,32 +98,29 @@ jobs:
           echo "Frontend spec version: $(jq -r '.info.version // "unknown"' "$FRONTEND_SPEC")"
           echo "Live spec version: $(jq -r '.info.version // "unknown"' "$LIVE_SPEC")"
           
-          # Check for path differences
-          FRONTEND_PATHS=$(jq -r '.paths | keys[]' "$FRONTEND_SPEC" | sort)
-          LIVE_PATHS=$(jq -r '.paths | keys[]' "$LIVE_SPEC" | sort)
-          FRONTEND_PATH_COUNT=$(echo "$FRONTEND_PATHS" | sed '/^$/d' | wc -l | tr -d ' ')
-          LIVE_PATH_COUNT=$(echo "$LIVE_PATHS" | sed '/^$/d' | wc -l | tr -d ' ')
+          # Check for path differences using canonical sorted files
+          jq -r '.paths | keys[]' "$FRONTEND_SPEC" | sort -u > /tmp/frontend-paths.txt
+          jq -r '.paths | keys[]' "$LIVE_SPEC" | sort -u > /tmp/live-paths.txt
 
-          echo "$FRONTEND_PATHS" > /tmp/frontend-paths.txt
-          echo "$LIVE_PATHS" > /tmp/live-paths.txt
+          FRONTEND_PATH_COUNT=$(wc -l < /tmp/frontend-paths.txt | tr -d ' ')
+          LIVE_PATH_COUNT=$(wc -l < /tmp/live-paths.txt | tr -d ' ')
+
           comm -23 /tmp/frontend-paths.txt /tmp/live-paths.txt > /tmp/missing-in-live.txt || true
           comm -13 /tmp/frontend-paths.txt /tmp/live-paths.txt > /tmp/missing-in-frontend.txt || true
-          
-          if [ "$FRONTEND_PATHS" != "$LIVE_PATHS" ]; then
+
+          if ! cmp -s /tmp/frontend-paths.txt /tmp/live-paths.txt; then
             echo "::warning::API paths differ between frontend spec and live implementation"
-            echo "Frontend has: $(echo "$FRONTEND_PATHS" | wc -l) paths"
-            echo "Live has: $(echo "$LIVE_PATHS" | wc -l) paths"
-            
-            MISSING_IN_LIVE=$(comm -23 <(echo "$FRONTEND_PATHS") <(echo "$LIVE_PATHS") | head -10)
-            if [ -n "$MISSING_IN_LIVE" ]; then
+            echo "Frontend has: ${FRONTEND_PATH_COUNT} paths"
+            echo "Live has: ${LIVE_PATH_COUNT} paths"
+
+            if [ -s /tmp/missing-in-live.txt ]; then
               echo "Missing in live (sample):"
-              echo "$MISSING_IN_LIVE"
+              head -10 /tmp/missing-in-live.txt
             fi
-            
-            MISSING_IN_FRONTEND=$(comm -13 <(echo "$FRONTEND_PATHS") <(echo "$LIVE_PATHS") | head -10)
-            if [ -n "$MISSING_IN_FRONTEND" ]; then
+
+            if [ -s /tmp/missing-in-frontend.txt ]; then
               echo "Missing in frontend (sample):"
-              echo "$MISSING_IN_FRONTEND"
+              head -10 /tmp/missing-in-frontend.txt
             fi
             echo "paths_match=false" >> "$GITHUB_OUTPUT"
           else
