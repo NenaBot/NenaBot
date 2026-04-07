@@ -3,6 +3,7 @@ name: API Integration Tests
 on:
   push:
     branches:
+      - feat/add-ci-tests
       - main
   pull_request:
     branches:

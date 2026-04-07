@@ -3,6 +3,7 @@ name: Submodule Compatibility Check
 on:
   push:
     branches:
+      - feat/add-ci-tests
       - main
     paths:
       - '.gitmodules'
