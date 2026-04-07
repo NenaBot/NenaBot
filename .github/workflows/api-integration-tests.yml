@@ -92,22 +92,85 @@ jobs:
         run: |
           set -o pipefail
           cd backend
-          python -m pytest tests/test_integration_api.py -v --tb=short 2>&1 | tee api-test-output.txt
+          python -m pytest tests/test_integration_api.py -v --tb=short --junitxml=pytest-report.xml 2>&1 | tee api-test-output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Generate test summary
         if: always()
+        env:
+          TEST_EXIT_CODE: ${{ steps.api_tests.outputs.exit_code }}
         run: |
-          {
-            echo "## 🔌 API Integration Tests"
-            echo
-            if [ -f backend/api-test-output.txt ]; then
-              # Extract summary line from pytest output
-              tail -n 20 backend/api-test-output.txt | grep -E "passed|failed|error" || echo "See log for details"
-            fi
-            echo
-            echo "**Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-          } >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY'
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          tests = failures = errors = skipped = 0
+          passed_test_names = []
+          failed_test_names = []
+
+          junit_path = pathlib.Path("backend/pytest-report.xml")
+          if junit_path.exists():
+              root = ET.parse(junit_path).getroot()
+              suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+              for suite in suites:
+                  tests += int(suite.attrib.get("tests", 0))
+                  failures += int(suite.attrib.get("failures", 0))
+                  errors += int(suite.attrib.get("errors", 0))
+                  skipped += int(suite.attrib.get("skipped", 0))
+                  for case in suite.findall("testcase"):
+                      classname = case.attrib.get("classname", "")
+                      name = case.attrib.get("name", "unknown")
+                      test_id = f"{classname}::{name}" if classname else name
+
+                      has_failure = case.find("failure") is not None
+                      has_error = case.find("error") is not None
+                      has_skip = case.find("skipped") is not None
+
+                      if has_failure or has_error:
+                          failed_test_names.append(test_id)
+                      elif not has_skip:
+                          passed_test_names.append(test_id)
+
+          passed = max(tests - failures - errors - skipped, 0)
+          exit_code = os.environ.get("TEST_EXIT_CODE", "1")
+          status = "PASSED" if exit_code == "0" else "FAILED"
+          status_emoji = "✅" if exit_code == "0" else "❌"
+
+          summary_path = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary_path.open("a", encoding="utf-8") as f:
+              f.write("## API Integration Tests\n\n")
+              f.write("| Item | Value |\n")
+              f.write("|---|---:|\n")
+              f.write(f"| {status_emoji} Status | **{status}** |\n")
+              f.write(f"| Total | `{tests}` |\n")
+              f.write(f"| Passed | `{passed}` |\n")
+              f.write(f"| Failed | `{failures}` |\n")
+              f.write(f"| Errors | `{errors}` |\n")
+              f.write(f"| Skipped | `{skipped}` |\n")
+              f.write("\n")
+              f.write(
+                  f"**Run**: [{os.environ.get('GITHUB_RUN_ID')}]({os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')})\n\n"
+              )
+
+              if passed_test_names or failed_test_names:
+                  f.write("<details>\n")
+                  f.write("<summary><strong>Test Details</strong></summary>\n\n")
+
+                  if passed_test_names:
+                      f.write("### Passed Tests\n")
+                      for test_name in passed_test_names:
+                          f.write(f"- `{test_name}`\n")
+                      f.write("\n")
+
+                  if failed_test_names:
+                      f.write("### Failed Tests\n")
+                      for test_name in failed_test_names:
+                          f.write(f"- `{test_name}`\n")
+                      f.write("\n")
+
+                  f.write("</details>\n")
+          PY
 
       - name: Teardown
         if: always()
