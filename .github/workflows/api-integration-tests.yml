@@ -1,0 +1,119 @@
+name: API Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: api-integration-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          set -euo pipefail
+          TOKEN="${SUBMODULES_PAT:-}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Fetch submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Start docker-compose stack
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml up -d --build
+          docker compose -f docker-compose.yml ps
+
+          # Wait for backend health check
+          backend_up=false
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
+              echo "Backend is up (attempt ${i})"
+              backend_up=true
+              break
+            fi
+            echo "Waiting for backend... (attempt ${i}/30)"
+            sleep 2
+          done
+
+          if [ "${backend_up}" != "true" ]; then
+            echo "--- Container state at timeout ---"
+            docker compose -f docker-compose.yml ps --all || true
+            echo "--- Compose logs (all services) ---"
+            docker compose -f docker-compose.yml logs --no-log-prefix || true
+            echo "::error::Backend did not become healthy"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest httpx
+
+      - name: Run API integration tests
+        id: api_tests
+        run: |
+          set -o pipefail
+          cd backend
+          python -m pytest tests/test_integration_api.py -v --tb=short 2>&1 | tee api-test-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          {
+            echo "## 🔌 API Integration Tests"
+            echo
+            if [ -f backend/api-test-output.txt ]; then
+              # Extract summary line from pytest output
+              tail -n 20 backend/api-test-output.txt | grep -E "passed|failed|error" || echo "See log for details"
+            fi
+            echo
+            echo "**Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml down -v || true
+
+      - name: Exit with test status
+        if: always()
+        run: |
+          exit ${{ steps.api_tests.outputs.exit_code }}

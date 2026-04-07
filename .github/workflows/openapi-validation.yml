@@ -1,0 +1,148 @@
+name: OpenAPI Spec Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: openapi-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          set -euo pipefail
+          TOKEN="${SUBMODULES_PAT:-}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Fetch submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Start docker-compose stack
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml up -d --build
+          docker compose -f docker-compose.yml ps
+
+          # Wait for backend health check
+          backend_up=false
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
+              echo "Backend is up (attempt ${i})"
+              backend_up=true
+              break
+            fi
+            echo "Waiting for backend... (attempt ${i}/30)"
+            sleep 2
+          done
+
+          if [ "${backend_up}" != "true" ]; then
+            echo "::error::Backend did not become healthy"
+            exit 1
+          fi
+
+      - name: Fetch live OpenAPI spec
+        run: |
+          set -euxo pipefail
+          curl -fsS "http://localhost:8000/openapi.json" > /tmp/live-openapi.json
+          echo "✅ Live spec fetched"
+
+      - name: Compare frontend bundled spec with live spec
+        id: compare_specs
+        run: |
+          set -euo pipefail
+          
+          FRONTEND_SPEC="frontend/openapispec.json"
+          LIVE_SPEC="/tmp/live-openapi.json"
+          
+          if [ ! -f "$FRONTEND_SPEC" ]; then
+            echo "::error::Frontend OpenAPI spec not found at $FRONTEND_SPEC"
+            exit 1
+          fi
+          
+          echo "Comparing specs..."
+          
+          # Extract key sections for comparison
+          echo "Frontend spec version: $(jq -r '.info.version // "unknown"' "$FRONTEND_SPEC")"
+          echo "Live spec version: $(jq -r '.info.version // "unknown"' "$LIVE_SPEC")"
+          
+          # Check for path differences
+          FRONTEND_PATHS=$(jq -r '.paths | keys[]' "$FRONTEND_SPEC" | sort)
+          LIVE_PATHS=$(jq -r '.paths | keys[]' "$LIVE_SPEC" | sort)
+          
+          if [ "$FRONTEND_PATHS" != "$LIVE_PATHS" ]; then
+            echo "::warning::API paths differ between frontend spec and live implementation"
+            echo "Frontend has: $(echo "$FRONTEND_PATHS" | wc -l) paths"
+            echo "Live has: $(echo "$LIVE_PATHS" | wc -l) paths"
+            
+            MISSING_IN_LIVE=$(comm -23 <(echo "$FRONTEND_PATHS") <(echo "$LIVE_PATHS") | head -10)
+            if [ -n "$MISSING_IN_LIVE" ]; then
+              echo "Missing in live (sample):"
+              echo "$MISSING_IN_LIVE"
+            fi
+            
+            MISSING_IN_FRONTEND=$(comm -13 <(echo "$FRONTEND_PATHS") <(echo "$LIVE_PATHS") | head -10)
+            if [ -n "$MISSING_IN_FRONTEND" ]; then
+              echo "Missing in frontend (sample):"
+              echo "$MISSING_IN_FRONTEND"
+            fi
+          else
+            echo "✅ API paths match"
+          fi
+          
+          # Save comparison for summary
+          echo "comparison_done=true" >> "$GITHUB_OUTPUT"
+
+      - name: Generate validation summary
+        if: always()
+        run: |
+          {
+            echo "## 📋 OpenAPI Spec Validation"
+            echo
+            echo "Compared frontend bundled spec with live backend implementation."
+            echo
+            echo "- Frontend spec: \`frontend/openapispec.json\`"
+            echo "- Live spec: \`http://localhost:8000/openapi.json\`"
+            echo
+            if [ "${{ steps.compare_specs.outputs.comparison_done }}" = "true" ]; then
+              echo "✅ Validation completed"
+            fi
+            echo
+            echo "**Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml down -v || true
