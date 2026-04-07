@@ -3,7 +3,6 @@ name: Compose Smoke Test
 on:
   push:
     branches:
-      - feat/add-ci-tests
       - main
   schedule:
     # Daily at 06:30 UTC (adjust as desired)

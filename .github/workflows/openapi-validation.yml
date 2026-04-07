@@ -3,7 +3,6 @@ name: OpenAPI Spec Validation
 on:
   push:
     branches:
-      - feat/add-ci-tests
       - main
   pull_request:
     branches:
