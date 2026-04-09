@@ -1,0 +1,187 @@
+name: OpenAPI Spec Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: openapi-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          set -euo pipefail
+          TOKEN="${SUBMODULES_PAT:-}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Fetch submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Start docker-compose stack
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml up -d --build
+          docker compose -f docker-compose.yml ps
+
+          # Wait for backend health check
+          backend_up=false
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
+              echo "Backend is up (attempt ${i})"
+              backend_up=true
+              break
+            fi
+            echo "Waiting for backend... (attempt ${i}/30)"
+            sleep 2
+          done
+
+          if [ "${backend_up}" != "true" ]; then
+            echo "::error::Backend did not become healthy"
+            exit 1
+          fi
+
+      - name: Fetch live OpenAPI spec
+        run: |
+          set -euxo pipefail
+          curl -fsS "http://localhost:8000/openapi.json" > /tmp/live-openapi.json
+          echo "✅ Live spec fetched"
+
+      - name: Compare frontend bundled spec with live spec
+        id: compare_specs
+        run: |
+          set -euo pipefail
+          
+          FRONTEND_SPEC="frontend/openapispec.json"
+          LIVE_SPEC="/tmp/live-openapi.json"
+          
+          if [ ! -f "$FRONTEND_SPEC" ]; then
+            echo "::error::Frontend OpenAPI spec not found at $FRONTEND_SPEC"
+            exit 1
+          fi
+          
+          echo "Comparing specs..."
+          
+          # Extract key sections for comparison
+          echo "Frontend spec version: $(jq -r '.info.version // "unknown"' "$FRONTEND_SPEC")"
+          echo "Live spec version: $(jq -r '.info.version // "unknown"' "$LIVE_SPEC")"
+          
+          # Check for path differences using canonical sorted files
+          jq -r '.paths | keys[]' "$FRONTEND_SPEC" | sort -u > /tmp/frontend-paths.txt
+          jq -r '.paths | keys[]' "$LIVE_SPEC" | sort -u > /tmp/live-paths.txt
+
+          FRONTEND_PATH_COUNT=$(wc -l < /tmp/frontend-paths.txt | tr -d ' ')
+          LIVE_PATH_COUNT=$(wc -l < /tmp/live-paths.txt | tr -d ' ')
+
+          comm -23 /tmp/frontend-paths.txt /tmp/live-paths.txt > /tmp/missing-in-live.txt || true
+          comm -13 /tmp/frontend-paths.txt /tmp/live-paths.txt > /tmp/missing-in-frontend.txt || true
+
+          if ! cmp -s /tmp/frontend-paths.txt /tmp/live-paths.txt; then
+            echo "::warning::API paths differ between frontend spec and live implementation"
+            echo "Frontend has: ${FRONTEND_PATH_COUNT} paths"
+            echo "Live has: ${LIVE_PATH_COUNT} paths"
+
+            if [ -s /tmp/missing-in-live.txt ]; then
+              echo "Missing in live (sample):"
+              head -10 /tmp/missing-in-live.txt
+            fi
+
+            if [ -s /tmp/missing-in-frontend.txt ]; then
+              echo "Missing in frontend (sample):"
+              head -10 /tmp/missing-in-frontend.txt
+            fi
+            echo "paths_match=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "✅ API paths match"
+            echo "paths_match=true" >> "$GITHUB_OUTPUT"
+          fi
+          
+          # Save comparison for summary
+          echo "frontend_path_count=${FRONTEND_PATH_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "live_path_count=${LIVE_PATH_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "comparison_done=true" >> "$GITHUB_OUTPUT"
+
+      - name: Generate validation summary
+        if: always()
+        run: |
+          {
+            echo "## 📋 OpenAPI Spec Validation"
+            echo
+            echo "Compared frontend bundled spec with live backend implementation."
+            echo
+            echo "| Check | Result |"
+            echo "|---|---:|"
+            if [ "${{ steps.compare_specs.outputs.comparison_done }}" = "true" ]; then
+              echo "| Spec comparison executed | ✅ Passed |"
+            else
+              echo "| Spec comparison executed | ❌ Failed |"
+            fi
+
+            if [ "${{ steps.compare_specs.outputs.paths_match }}" = "true" ]; then
+              echo "| API paths match | ✅ Passed |"
+            else
+              echo "| API paths match | ❌ Failed |"
+            fi
+
+            echo
+            echo "- Frontend spec: \`frontend/openapispec.json\`"
+            echo "- Live spec: \`http://localhost:8000/openapi.json\`"
+            echo "- Frontend path count: \`${{ steps.compare_specs.outputs.frontend_path_count }}\`"
+            echo "- Live path count: \`${{ steps.compare_specs.outputs.live_path_count }}\`"
+            echo
+
+            if [ -s /tmp/missing-in-live.txt ] || [ -s /tmp/missing-in-frontend.txt ]; then
+              echo "<details>"
+              echo "<summary><strong>Path Differences</strong></summary>"
+              echo
+              if [ -s /tmp/missing-in-live.txt ]; then
+                echo "### Missing In Live (present in frontend spec)"
+                sed 's/^/- `&`/' /tmp/missing-in-live.txt | head -20
+                echo
+              fi
+              if [ -s /tmp/missing-in-frontend.txt ]; then
+                echo "### Missing In Frontend (present in live spec)"
+                sed 's/^/- `&`/' /tmp/missing-in-frontend.txt | head -20
+                echo
+              fi
+              echo "</details>"
+            fi
+            echo
+            echo "**Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml down -v || true
