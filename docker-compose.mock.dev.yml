@@ -1,0 +1,36 @@
+# Mock + development override.
+#
+# Usage:
+#   podman compose -f docker-compose.yml -f docker-compose.mock.dev.yml up --build
+#
+# This keeps backend in mock mode and runs frontend with Vite for live reload.
+
+services:
+  backend:
+    environment:
+      - NENABOT_MOCK_MODE=1
+
+  frontend:
+    build:
+      target: build
+      args:
+        VITE_API_URL: http://backend:8000
+        VITE_API_TIMEOUT: ${FRONTEND_VITE_API_TIMEOUT:-30000}
+    depends_on:
+      - backend
+    working_dir: /app
+    command: sh -c "if [ -f package-lock.json ]; then npm ci; else npm install; fi && npm run dev -- --host 0.0.0.0 --port 3000"
+    ports: !override
+      - "${FRONTEND_PORT:-8080}:3000"
+    volumes:
+      - ./frontend:/app:Z
+      - frontend-node-modules:/app/node_modules
+    environment:
+      - VITE_API_URL=http://backend:8000
+      - VITE_API_TIMEOUT=${FRONTEND_VITE_API_TIMEOUT:-30000}
+      - BROWSER=none
+      - CI=true
+    restart: unless-stopped
+
+volumes:
+  frontend-node-modules:
