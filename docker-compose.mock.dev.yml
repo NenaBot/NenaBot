@@ -14,7 +14,7 @@ services:
     build:
       target: build
       args:
-        VITE_API_URL: http://backend:8000
+        VITE_API_URL: http://localhost:${BACKEND_PORT:-8000}
         VITE_API_TIMEOUT: ${FRONTEND_VITE_API_TIMEOUT:-30000}
     depends_on:
       - backend
@@ -26,7 +26,7 @@ services:
       - ./frontend:/app:Z
       - frontend-node-modules:/app/node_modules
     environment:
-      - VITE_API_URL=http://backend:8000
+      - VITE_API_URL=http://localhost:${BACKEND_PORT:-8000}
       - VITE_API_TIMEOUT=${FRONTEND_VITE_API_TIMEOUT:-30000}
       - BROWSER=none
       - CI=true
