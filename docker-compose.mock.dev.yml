@@ -1,7 +1,7 @@
 # Mock + development override.
 #
-# Usage:
-#   podman compose -f docker-compose.yml -f docker-compose.mock.dev.yml up --build
+# Usage (requires a Docker Compose version that supports `!override`):
+#   docker compose -f docker-compose.yml -f docker-compose.mock.dev.yml up --build
 #
 # This keeps backend in mock mode and runs frontend with Vite for live reload.
 
