@@ -7,6 +7,13 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - DB_PATH=data/nenabot.db
+      - IONVISION_BASE_URL=http://localhost:8080
+      - IONVISION_WS_BASE_URL=ws://192.168.1.109/socket
+      - IONVISION_BASE_URL=http://192.168.1.109/api
+      - MAX_JOBS=1
+
     restart: unless-stopped
 
   frontend:
