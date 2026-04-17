@@ -7,13 +7,20 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend/data:/app/data
     restart: unless-stopped
-
+    environment:
+      - NENABOT_DEFAULT_MEASUREMENT_THRESHOLD=120
+      - NENABOT_DEFAULT_MEASURING_POINTS_PER_CM=0.5
+      - NENABOT_DEFAULT_WORK_Z=-63
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
+        # the frontend_vite_api needs to be set to ip of the pi 
+        # like 192.168.1.113:8000 (for in lab testing)
         VITE_API_URL: ${FRONTEND_VITE_API_URL:-http://localhost:8000}
         VITE_API_TIMEOUT: ${FRONTEND_VITE_API_TIMEOUT:-30000}
     container_name: nenabot-frontend
