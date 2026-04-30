@@ -18,11 +18,34 @@ jobs:
           submodules: false
           fetch-depth: 0
 
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          set -euo pipefail
+          TOKEN="${SUBMODULES_PAT:-}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Fetch submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
       - name: Install Doxygen
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends doxygen
+          curl -fsSL "https://github.com/doxygen/doxygen/releases/download/Release_1_16_1/doxygen-1.16.1.linux.bin.tar.gz" \
+            -o /tmp/doxygen.tar.gz
+          tar -xzf /tmp/doxygen.tar.gz -C /tmp
+          sudo mv /tmp/doxygen-1.16.1/bin/doxygen /usr/local/bin/doxygen
           doxygen --version
 
       - name: Generate documentation
@@ -30,18 +53,11 @@ jobs:
           set -euo pipefail
           doxygen Doxyfile
 
-      - name: Zip generated HTML
-        run: |
-          set -euo pipefail
-          cd docs/generated
-          zip -r -9 ../../nenabot-docs.zip html/
-          echo "Archive size: $(du -sh ../../nenabot-docs.zip | cut -f1)"
-
       - name: Upload documentation artifact
         uses: actions/upload-artifact@v4
         with:
           name: nenabot-docs
-          path: nenabot-docs.zip
+          path: docs/generated/html/
           retention-days: 30
 
       - name: Write job summary
@@ -54,9 +70,9 @@ jobs:
             echo
             echo "| Item | Value |"
             echo "|---|---|"
-            echo "| Artifact | \`nenabot-docs.zip\` |"
-            if [ -f nenabot-docs.zip ]; then
-              echo "| Archive size | \`$(du -sh nenabot-docs.zip | cut -f1)\` |"
+            echo "| Artifact | \`nenabot-docs\` |"
+            if [ -d docs/generated/html ]; then
+              echo "| HTML files | \`$(find docs/generated/html -name '*.html' | wc -l)\` |"
             fi
             echo
             echo "> Triggered by \`${GITHUB_EVENT_NAME}\` on \`${GITHUB_REF_NAME}\` — run [\`${GITHUB_RUN_ID}\`](${run_url})"
