@@ -7,25 +7,28 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "${BACKEND_PORT:-8000}:8000"
-    environment:
-      - DB_PATH=data/nenabot.db
-      - IONVISION_BASE_URL=http://localhost:8080
-      - IONVISION_WS_BASE_URL=ws://192.168.1.109/socket
-      - IONVISION_BASE_URL=http://192.168.1.109/api
-      - MAX_JOBS=1
-
+    volumes:
+      - ./backend/data:/app/data
     restart: unless-stopped
+    environment:
+      - IONVISION_BASE_URL=http://192.168.1.109/api
+      - IONVISION_WS_BASE_URL=ws://192.168.1.109/socket
+      - NENABOT_DEFAULT_MEASUREMENT_THRESHOLD=120
+      - NENABOT_DEFAULT_MEASURING_POINTS_PER_CM=0.5
+      - NENABOT_DEFAULT_WORK_Z=-63
+#      - NENABOT_INTRINSICS_PATH=/app/data/calibration/camera_params.json
+#     - NENABOT_MAPPING_PATH=/app/data/calibration/robot_mapping.json
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: ${FRONTEND_VITE_API_URL:-http://localhost:8000}
-        VITE_API_TIMEOUT: ${FRONTEND_VITE_API_TIMEOUT:-30000}
+        VITE_API_URL: http://192.168.1.115:8000
+        VITE_API_TIMEOUT: 30000
     container_name: nenabot-frontend
     depends_on:
       - backend
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_PORT:-80}:80"
     restart: unless-stopped
