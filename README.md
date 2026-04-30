@@ -69,7 +69,47 @@ Automatic submodule update workflow:
 
 - [SUBMODULES.md](SUBMODULES.md)
 
-## Project Docs
+## Documentation
 
+### Source Code Documentation
+
+Generate comprehensive cross-referenced documentation for both Python (backend) and TypeScript (frontend) code using Doxygen:
+
+```bash
+./scripts/generate-docs.sh
+```
+
+Generated documentation is saved to `docs/generated/html/`. Open `docs/generated/html/index.html` in a browser to view.
+
+To automatically open the generated documentation in your default browser:
+
+```bash
+./scripts/generate-docs.sh --open
+```
+
+**Requirements:**
+- Doxygen must be installed. See [Doxygen Installation](#doxygen-installation) below.
+
+#### Doxygen Installation
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get install doxygen
+```
+
+**macOS:**
+```bash
+brew install doxygen
+```
+
+**Windows:**
+- Download from [doxygen.nl](https://www.doxygen.nl/download.html), or
+- Via Chocolatey: `choco install doxygen`
+
+### Project Docs
+
+Additional project documentation:
+
+- [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) — Doxygen setup details and regeneration info
 - [backend/README.md](backend/README.md)
 - [frontend/README.md](frontend/README.md)

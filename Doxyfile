@@ -1,0 +1,128 @@
+# Doxyfile for NenaBot Project
+# Configuration for documenting both Python (backend) and TypeScript (frontend) source code
+
+PROJECT_NAME           = "NenaBot"
+PROJECT_NUMBER         = "1.0"
+PROJECT_BRIEF          = "Automated robot control and vision processing system"
+PROJECT_LOGO           = 
+
+OUTPUT_DIRECTORY       = docs/generated
+CREATE_SUBDIRS         = NO
+
+# Input configuration
+INPUT                  = backend/app \
+                         backend/lib/dobot \
+                         frontend/src
+
+# File patterns to process
+FILE_PATTERNS          = *.py \
+                         *.ts \
+                         *.tsx
+
+# Recursive input
+RECURSIVE              = YES
+
+# Exclude patterns
+EXCLUDE_PATTERNS       = */tests/* \
+                         */.test.* \
+                         */.spec.* \
+                         */node_modules/* \
+                         */dist/* \
+                         */build/* \
+                         */__pycache__/* \
+                         */\.* \
+                         */Qt*.framework
+
+# Python configuration
+PYTHON_DOCSTRING       = YES
+EXTENSION_MAPPING      = py=Python
+
+# Output configuration
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_RTF           = NO
+GENERATE_XML           = NO
+
+# Documentation options
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_ANON_NSPACES   = NO
+
+# Source code cross-references
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+
+# Documentation style
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+
+# Comment options
+JAVADOC_AUTOBRIEF      = YES
+HAVE_DOT               = NO
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+GROUP_GRAPHS           = YES
+UML_LOOK               = NO
+
+# Markdown support
+MARKDOWN_SUPPORT       = YES
+TOC_INCLUDE_HEADINGS   = 0
+
+# HTML styling
+HTML_COLORSTYLE_HUE    = 220
+HTML_COLORSTYLE_SAT    = 100
+HTML_COLORSTYLE_GAMMA  = 80
+
+# Footer
+HTML_FOOTER            = 
+GENERATE_TREEVIEW      = YES
+
+# Search
+SEARCHENGINE           = NO
+
+# Sorting
+SORT_MEMBER_DOCS       = YES
+SORT_BRIEF_DOCS        = YES
+SORT_BY_SCOPE_NAME     = NO
+
+# Optimization
+OPTIMIZE_OUTPUT_FOR_C  = NO
+OPTIMIZE_OUTPUT_JAVA   = NO
+
+# Aliases for custom commands
+ALIASES                = 
+
+# Image paths
+IMAGE_PATH             = 
+
+# Dot configuration (graphs)
+DOT_PATH               = 
+MAX_DOT_GRAPH_DEPTH    = 0
+
+# Verbatim headers
+SHOW_FILES             = YES
+SHOW_NAMESPACES        = YES
+
+# Alphabetical index
+ALPHABETICAL_INDEX     = YES
+
+# Generate todolist
+GENERATE_TODOLIST      = YES
+GENERATE_TESTLIST      = YES
+GENERATE_BUGLIST       = YES
+GENERATE_DEPRECATEDLIST = YES
+
+# Graph legend
+SHOW_INCLUDE_FILES     = YES
+
+# Clang parser (for better C/C++ support, not applicable here)
+USE_MDFILE_AS_MAINPAGE = docs/DOCUMENTATION.md
