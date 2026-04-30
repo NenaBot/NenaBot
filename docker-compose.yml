@@ -16,6 +16,7 @@ services:
       - NENABOT_DEFAULT_MEASUREMENT_THRESHOLD=120
       - NENABOT_DEFAULT_MEASURING_POINTS_PER_CM=0.5
       - NENABOT_DEFAULT_WORK_Z=-63
+      - NENABOT_MAX_JOBS=3
 #      - NENABOT_INTRINSICS_PATH=/app/data/calibration/camera_params.json
 #     - NENABOT_MAPPING_PATH=/app/data/calibration/robot_mapping.json
 
