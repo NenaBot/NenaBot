@@ -1,0 +1,64 @@
+name: Generate Doxygen Docs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  doxygen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Install Doxygen
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends doxygen
+          doxygen --version
+
+      - name: Generate documentation
+        run: |
+          set -euo pipefail
+          doxygen Doxyfile
+
+      - name: Zip generated HTML
+        run: |
+          set -euo pipefail
+          cd docs/generated
+          zip -r ../../nenabot-docs.zip html/
+          echo "Archive size: $(du -sh ../../nenabot-docs.zip | cut -f1)"
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nenabot-docs
+          path: nenabot-docs.zip
+          retention-days: 30
+          compression-level: 9
+
+      - name: Write job summary
+        if: always()
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "## 📚 Doxygen Documentation"
+            echo
+            echo "| Item | Value |"
+            echo "|---|---|"
+            echo "| Artifact | \`nenabot-docs.zip\` |"
+            if [ -f nenabot-docs.zip ]; then
+              echo "| Archive size | \`$(du -sh nenabot-docs.zip | cut -f1)\` |"
+            fi
+            echo
+            echo "> Triggered by \`${GITHUB_EVENT_NAME}\` on \`${GITHUB_REF_NAME}\` — run [\`${GITHUB_RUN_ID}\`](${run_url})"
+          } >> "${GITHUB_STEP_SUMMARY}"
