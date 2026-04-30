@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           cd docs/generated
-          zip -r ../../nenabot-docs.zip html/
+          zip -r -9 ../../nenabot-docs.zip html/
           echo "Archive size: $(du -sh ../../nenabot-docs.zip | cut -f1)"
 
       - name: Upload documentation artifact
@@ -43,7 +43,6 @@ jobs:
           name: nenabot-docs
           path: nenabot-docs.zip
           retention-days: 30
-          compression-level: 9
 
       - name: Write job summary
         if: always()
