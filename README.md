@@ -28,6 +28,29 @@ docker compose -f docker-compose.yml -f docker-compose.hardware.yml up -d --buil
 
 See [HARDWARE.md](HARDWARE.md) for device mapping.
 
+## Mock Dev Mode
+
+Use this mode for frontend hot reload with backend mock mode enabled:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mock.dev.yml up -d --build
+```
+
+Open:
+
+- Frontend (Vite via container): http://localhost:8080
+- Backend docs: http://localhost:8000/docs
+
+Stop:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mock.dev.yml down
+```
+
+Troubleshooting:
+
+- If frontend container logs show npm lockfile errors together with permission errors, check that the frontend bind mount in `docker-compose.mock.dev.yml` uses `:Z` (SELinux relabel on SELinux-enabled hosts).
+
 ## Config
 
 Root `.env` controls ports and frontend API build vars.

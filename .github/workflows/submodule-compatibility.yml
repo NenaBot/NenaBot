@@ -1,0 +1,189 @@
+name: Submodule Compatibility Check
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.gitmodules'
+      - '.github/workflows/submodule-compatibility.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.gitmodules'
+  workflow_dispatch:
+
+concurrency:
+  group: submodule-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          set -euo pipefail
+          TOKEN="${SUBMODULES_PAT:-}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Fetch submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Check frontend and backend versions
+        id: version_check
+        run: |
+          set -euo pipefail
+
+          echo "📦 Checking submodule compatibility..."
+          echo
+
+          # Extract frontend version
+          FRONTEND_VERSION=$(jq -r '.version // "unknown"' frontend/package.json 2>/dev/null || echo "unknown")
+          echo "Frontend version: $FRONTEND_VERSION"
+
+          # Extract backend version
+          BACKEND_VERSION=$(grep -E '^version|version =' backend/pyproject.toml 2>/dev/null | head -1 | cut -d'"' -f2 || echo "unknown")
+          echo "Backend version: $BACKEND_VERSION"
+
+          # Check if package.json exists
+          MISSING_VERSION_FILES=0
+          if [ ! -f "frontend/package.json" ]; then
+            echo "::warning::frontend/package.json not found"
+            ((MISSING_VERSION_FILES++))
+          fi
+
+          # Check if pyproject.toml exists
+          if [ ! -f "backend/pyproject.toml" ]; then
+            echo "::warning::backend/pyproject.toml not found"
+            ((MISSING_VERSION_FILES++))
+          fi
+
+          echo
+          if [ "$MISSING_VERSION_FILES" -eq 0 ]; then
+            echo "✅ Submodule versions present"
+            echo "version_files_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️ Missing version files: $MISSING_VERSION_FILES"
+            echo "version_files_ok=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version_files_missing_count=${MISSING_VERSION_FILES}" >> "$GITHUB_OUTPUT"
+          echo "version_check_done=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify submodule structure
+        id: structure_check
+        run: |
+          set -euo pipefail
+
+          echo "Checking submodule structure..."
+          
+          ISSUES=0
+
+          # Frontend checks
+          if [ ! -f "frontend/Dockerfile" ]; then
+            echo "::warning::frontend/Dockerfile missing"
+            ((ISSUES++))
+          fi
+
+          if [ ! -f "frontend/package.json" ]; then
+            echo "::warning::frontend/package.json missing"
+            ((ISSUES++))
+          fi
+
+          # Backend checks
+          if [ ! -f "backend/Dockerfile" ]; then
+            echo "::warning::backend/Dockerfile missing"
+            ((ISSUES++))
+          fi
+
+          if [ ! -f "backend/pyproject.toml" ]; then
+            echo "::warning::backend/pyproject.toml missing"
+            ((ISSUES++))
+          fi
+
+          if [ ! -f "backend/requirements.txt" ]; then
+            echo "::warning::backend/requirements.txt missing"
+            ((ISSUES++))
+          fi
+
+          if [ $ISSUES -eq 0 ]; then
+            echo "✅ All required submodule files present"
+            echo "structure_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️ Found $ISSUES structure issues"
+            echo "structure_ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "structure_issue_count=${ISSUES}" >> "$GITHUB_OUTPUT"
+          echo "structure_check_done=true" >> "$GITHUB_OUTPUT"
+
+      - name: List submodule commits
+        run: |
+          set -euo pipefail
+          echo "Current submodule commit pointers:"
+          git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | while read -r key path; do
+            module="${key#submodule.}"
+            module="${module%.path}"
+            url=$(git config -f .gitmodules --get "submodule.${module}.url" || echo "unknown")
+            commit=$(cd "$path" 2>/dev/null && git rev-parse HEAD || echo "N/A")
+            echo "  - ${module}: ${commit} (${url})"
+          done
+
+      - name: Generate compatibility report
+        if: always()
+        run: |
+          {
+            echo "## 🔗 Submodule Compatibility Check"
+            echo
+            echo "Verified that frontend and backend submodules have required structure and version info."
+            echo
+            echo "| Check | Result |"
+            echo "|---|---:|"
+            if [ "${{ steps.version_check.outputs.version_files_ok }}" = "true" ]; then
+              echo "| Version files present | ✅ Passed |"
+            else
+              echo "| Version files present | ❌ Failed |"
+            fi
+
+            if [ "${{ steps.structure_check.outputs.structure_ok }}" = "true" ]; then
+              echo "| Required submodule files present | ✅ Passed |"
+            else
+              echo "| Required submodule files present | ❌ Failed |"
+            fi
+
+            echo
+            echo "- Total checks: \`2\`"
+            PASSED=0
+            if [ "${{ steps.version_check.outputs.version_files_ok }}" = "true" ]; then PASSED=$((PASSED+1)); fi
+            if [ "${{ steps.structure_check.outputs.structure_ok }}" = "true" ]; then PASSED=$((PASSED+1)); fi
+            FAILED=$((2-PASSED))
+            echo "- Passed checks: \`${PASSED}\`"
+            echo "- Failed checks: \`${FAILED}\`"
+            echo "- Missing version files: \`${{ steps.version_check.outputs.version_files_missing_count }}\`"
+            echo "- Structure issues: \`${{ steps.structure_check.outputs.structure_issue_count }}\`"
+            echo
+            echo "**Run**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } >> "$GITHUB_STEP_SUMMARY"

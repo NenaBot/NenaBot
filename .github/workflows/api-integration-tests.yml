@@ -1,0 +1,182 @@
+name: API Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: api-integration-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Configure submodule URL auth
+        env:
+          SUBMODULES_PAT: ${{ secrets.SUBMODULES_PAT }}
+        run: |
+          set -euo pipefail
+          TOKEN="${SUBMODULES_PAT:-}"
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::SUBMODULES_PAT is required and is not set."
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+
+      - name: Fetch submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - name: Start docker-compose stack
+        run: |
+          set -euxo pipefail
+          docker compose -f docker-compose.yml up -d --build
+          docker compose -f docker-compose.yml ps
+
+          # Wait for backend health check
+          backend_up=false
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 "http://localhost:8000/openapi.json" >/dev/null 2>&1; then
+              echo "Backend is up (attempt ${i})"
+              backend_up=true
+              break
+            fi
+            echo "Waiting for backend... (attempt ${i}/30)"
+            sleep 2
+          done
+
+          if [ "${backend_up}" != "true" ]; then
+            echo "--- Container state at timeout ---"
+            docker compose -f docker-compose.yml ps --all || true
+            echo "--- Compose logs (all services) ---"
+            docker compose -f docker-compose.yml logs --no-log-prefix || true
+            echo "::error::Backend did not become healthy"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest httpx
+
+      - name: Run API integration tests
+        id: api_tests
+        run: |
+          set -o pipefail
+          cd backend
+          python -m pytest tests/test_integration_api.py -v --tb=short --junitxml=pytest-report.xml 2>&1 | tee api-test-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate test summary
+        if: always()
+        env:
+          TEST_EXIT_CODE: ${{ steps.api_tests.outputs.exit_code }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          tests = failures = errors = skipped = 0
+          passed_test_names = []
+          failed_test_names = []
+
+          junit_path = pathlib.Path("backend/pytest-report.xml")
+          if junit_path.exists():
+              root = ET.parse(junit_path).getroot()
+              suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+              for suite in suites:
+                  tests += int(suite.attrib.get("tests", 0))
+                  failures += int(suite.attrib.get("failures", 0))
+                  errors += int(suite.attrib.get("errors", 0))
+                  skipped += int(suite.attrib.get("skipped", 0))
+                  for case in suite.findall("testcase"):
+                      classname = case.attrib.get("classname", "")
+                      name = case.attrib.get("name", "unknown")
+                      test_id = f"{classname}::{name}" if classname else name
+
+                      has_failure = case.find("failure") is not None
+                      has_error = case.find("error") is not None
+                      has_skip = case.find("skipped") is not None
+
+                      if has_failure or has_error:
+                          failed_test_names.append(test_id)
+                      elif not has_skip:
+                          passed_test_names.append(test_id)
+
+          passed = max(tests - failures - errors - skipped, 0)
+          exit_code = os.environ.get("TEST_EXIT_CODE", "1")
+          status = "PASSED" if exit_code == "0" else "FAILED"
+          status_emoji = "✅" if exit_code == "0" else "❌"
+
+          summary_path = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary_path.open("a", encoding="utf-8") as f:
+              f.write("## API Integration Tests\n\n")
+              f.write("| Item | Value |\n")
+              f.write("|---|---:|\n")
+              f.write(f"| {status_emoji} Status | **{status}** |\n")
+              f.write(f"| Total | `{tests}` |\n")
+              f.write(f"| Passed | `{passed}` |\n")
+              f.write(f"| Failed | `{failures}` |\n")
+              f.write(f"| Errors | `{errors}` |\n")
+              f.write(f"| Skipped | `{skipped}` |\n")
+              f.write("\n")
+              f.write(
+                  f"**Run**: [{os.environ.get('GITHUB_RUN_ID')}]({os.environ.get('GITHUB_SERVER_URL')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')})\n\n"
+              )
+
+              if passed_test_names or failed_test_names:
+                  f.write("<details>\n")
+                  f.write("<summary><strong>Test Details</strong></summary>\n\n")
+
+                  if passed_test_names:
+                      f.write("### Passed Tests\n")
+                      for test_name in passed_test_names:
+                          f.write(f"- `{test_name}`\n")
+                      f.write("\n")
+
+                  if failed_test_names:
+                      f.write("### Failed Tests\n")
+                      for test_name in failed_test_names:
+                          f.write(f"- `{test_name}`\n")
+                      f.write("\n")
+
+                  f.write("</details>\n")
+          PY
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f docker-compose.yml down -v || true
+
+      - name: Exit with test status
+        if: always()
+        run: |
+          exit ${{ steps.api_tests.outputs.exit_code }}
